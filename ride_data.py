@@ -30,7 +30,18 @@ class AppDB:
 class App:
     def __init__(self) -> None:
         self.db = AppDB()
-        self.session_string = ""
+        self.session_name_string = pendulum.now().format("YYYY-MM-DD_HH-mm-ss")
+
+    def init_app(self) -> bool:
+        """
+        Initialize app, if fails, return false
+        """
+        self.db.init_db()
+        if self.db is None:
+            return False
+
+        stats = self.db.db_stats_to_string()
+        return True
 
     def show_main_menu(self) -> None:
         pass
@@ -46,6 +57,9 @@ def run():
     app = App()
     breakpoint()
     pass
+
+    def session_to_string(self) -> str:
+        return ""
 
 
 if __name__ == "__main__":

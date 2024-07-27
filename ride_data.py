@@ -13,7 +13,6 @@ class AppDB:
     def __init__(self) -> None:
         pass
         self.db = None
-        
         self.init_db()
 
     def init_db(self):
@@ -46,7 +45,8 @@ class App:
 def run():
     app = App()
     breakpoint()
-    pass    
+    pass
+
 
 if __name__ == "__main__":
     run()

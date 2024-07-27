@@ -157,23 +157,23 @@ class AppDB:
         if not isinstance(self.conn, sqlite3.Connection):
             return ""
 
-        row_count = None
-        file_count = None
-        min_date = None
-        max_date = None
-
         try:
             row_count = self.conn.execute("SELECT COUNT(*) AS cnt FROM ride_data;").fetchone().get("cnt", 0)
             file_count = (
-                self.conn.execute("SELECT FileName, COUNT(*) AS cnt FROM ride_data GROUP BY FileName;")
+                self.conn.execute(
+                    "WITH qry AS (SELECT FileName FROM ride_data GROUP BY FileName) select count(*) AS count FROM qry;"
+                )
                 .fetchone()
-                .get("cnt", 0)
+                .get("count", 0)
             )
-            # min_date = self.conn.execute("SELECT COUNT(*) AS cnt FROM ride_data;").fetchone().get("cnt", 0)
-            # max_date = self.conn.execute("SELECT COUNT(*) AS cnt FROM ride_data;").fetchone().get("cnt", 0)
+            date_qry = (
+                "WITH qry1 AS (select datetime(CheckoutDateLocal||' '||CheckoutTimeLocal) AS return_dt FROM ride_data )"
+                " SELECT MIN(return_dt) AS min_return , MAX(return_dt) AS max_return FROM qry1;"
+            )
+            date_rslt = self.conn.execute(date_qry).fetchone()
             return (
                 f"DB Rows: {row_count}\nFile Count: {file_count}\n"
-                f"Min Checkout Date: {min_date}\nMax Checkout Date: {max_date}"
+                f"Min Checkout Date: {date_rslt["min_return"]}\nMax Checkout Date: {date_rslt["max_return"]}"
             )
         except Exception as e:
             return f"error | {e}"
@@ -244,7 +244,9 @@ def run():
         app.db.close_connection()
         sys.exit(1)
 
-    app.db.import_report_to_db("./BCycle_45_DesMoinesBCycle_20240501_20240531.csv")
+    # app.db.import_report_to_db("./BCycle_45_DesMoinesBCycle_20240501_20240531.csv")
+    stats = app.db.db_stats_to_string()
+    breakpoint()
     app.db.close_connection()
     pass
 

@@ -15,7 +15,6 @@ DB_NAME = "ridedb.db"
 class AppDB:
     """
     class for managing sqlite database
-    # TODO add decorator for handling db connection
     """
 
     def __init__(self, path: str) -> None:
@@ -162,27 +161,34 @@ class AppDB:
         except sqlite3.OperationalError:
             return False
 
-    def db_stats_to_string(self, conn: Connection) -> str:
-        try:
-            row_count = conn.execute("SELECT COUNT(*) AS cnt FROM ride_data;").fetchone().get("cnt", 0)
-            file_count = (
-                conn.execute(
-                    "WITH qry AS (SELECT FileName FROM ride_data GROUP BY FileName) select count(*) AS count FROM qry;"
+    def db_stats_to_string(self) -> str:
+        """
+        Returns a string with some database statistics
+        """
+        with self.connect_db(self.db_path) as conn:
+            try:
+                row_count = conn.execute("SELECT COUNT(*) AS cnt FROM ride_data;").fetchone().get("cnt", 0)
+                file_count = (
+                    conn.execute(
+                        "WITH qry AS (SELECT FileName FROM ride_data GROUP BY FileName) select count(*) AS count FROM qry;"
+                    )
+                    .fetchone()
+                    .get("count", 0)
                 )
-                .fetchone()
-                .get("count", 0)
-            )
-            date_qry = (
-                "WITH qry1 AS (select datetime(CheckoutDateLocal||' '||CheckoutTimeLocal) AS return_dt FROM ride_data )"
-                " SELECT MIN(return_dt) AS min_return , MAX(return_dt) AS max_return FROM qry1;"
-            )
-            date_rslt = conn.execute(date_qry).fetchone()
-            return (
-                f"DB Rows: {row_count}\nFile Count: {file_count}\n"
-                f"Min Checkout Date: {date_rslt["min_return"]}\nMax Checkout Date: {date_rslt["max_return"]}"
-            )
-        except Exception as e:
-            return f"error | {e}"
+                date_qry = (
+                    "WITH qry1 AS (select datetime(CheckoutDateLocal||' '||CheckoutTimeLocal) AS return_dt FROM ride_data )"
+                    " SELECT MIN(return_dt) AS min_return , MAX(return_dt) AS max_return FROM qry1;"
+                )
+                date_rslt = conn.execute(date_qry).fetchone()
+                return (
+                    f"Database Rows: {row_count}\nSource File Count: {file_count}\n"
+                    f"Min Checkout Datetime: {date_rslt["min_return"]}\n"
+                    f"Max Checkout Datetime: {date_rslt["max_return"]}"
+                )
+            except Exception as e:
+                print(f"db stats error | {e}")
+                return ""
+        conn.close()
 
     def import_report_to_db(self, report_path: str) -> None:
         """
@@ -233,28 +239,53 @@ class App:
             return False
         return True
 
+    def exit_app(self, exit_code: int = 0) -> None:
+        print("Exiting app")
+        sys.exit(exit_code)
+
     def show_main_menu(self) -> None:
-        # stats = self.db.db_stats_to_string()
-        pass
+        option_map = {"1": self.show_db_menu, "2": self.show_report_menu, "3": self.exit_app}
+        options = ["1: Database Actions", "2: Report Actions", "3: Quit"]
+        stats = self.db.db_stats_to_string()
+        print(stats)
+
+        user_choice = input(f"\nMain Menu:\n{'='* 10}\nPick action:\n{'\n'.join(options)}\n")
+        while user_choice not in option_map.keys():
+            self.show_main_menu()
+        option_map[user_choice]()
 
     def show_db_menu(self) -> None:
-        pass
+        option_map = {"1": self.import_report_file, "2": self.show_main_menu}
+        options = ["1: Import report csv file", "2: Exit to Main menu",]
+        user_choice = input(f"\nDatabase Menu:\n{'='* 14}\nPick action:\n{'\n'.join(options)}\n")
+        while user_choice not in option_map.keys():
+            self.show_db_menu()
+        option_map[user_choice]()
+        self.show_db_menu()
+
+    def import_report_file(self) -> None:
+        file_path = input("Report CSV file path: ")
+        self.db.import_report_to_db(file_path)
 
     def show_report_menu(self) -> None:
-        pass
+        option_map = {"1": self.show_main_menu}
+        options = ["1: Exit to Main menu"]
 
-    def session_to_string(self) -> str:
-        return ""
+        user_choice = input(f"\nReport Menu:\n{'='* 12}\nPick action:\n{'\n'.join(options)}\n")
+        while user_choice not in option_map.keys():
+            self.show_report_menu()
+        option_map[user_choice]()
+        self.show_report_menu()
 
 
 def run():
     app = App()
-    # app = App("ride_db.db")
     if not app.init_app():
-        sys.exit(1)
+        app.exit_app(1)
 
     # app.db.import_report_to_db("./BCycle_45_DesMoinesBCycle_20240501_20240531.csv")
     # app.db.import_report_to_db("./BCycle_45_DesMoinesBCycle_20240601_20240630.csv")
+    app.show_main_menu()
     pass
 
 

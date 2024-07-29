@@ -186,9 +186,11 @@ class AppDB:
         if not isinstance(self.conn, sqlite3.Connection):
             return False
         try:
+            filename = os.path.split(report_path)[1]
+            print(f"importing report: '{filename}'")
             df = pd.read_csv(report_path, dtype=self.df_dtype())
             df = df.fillna("")
-            df["FileName"] = os.path.split(report_path)[1]
+            df["FileName"] = filename
             df["ImportDateTime"] = pendulum.now().to_datetime_string()
             for row in df.itertuples():
                 cols = [each for each in row._fields if each != "Index"]
@@ -221,10 +223,10 @@ class App:
         if self.db is None:
             return False
 
-        stats = self.db.db_stats_to_string()
         return True
 
     def show_main_menu(self) -> None:
+        stats = self.db.db_stats_to_string()
         pass
 
     def show_db_menu(self) -> None:
@@ -244,9 +246,7 @@ def run():
         app.db.close_connection()
         sys.exit(1)
 
-    # app.db.import_report_to_db("./BCycle_45_DesMoinesBCycle_20240501_20240531.csv")
-    stats = app.db.db_stats_to_string()
-    breakpoint()
+    app.db.import_report_to_db("./BCycle_45_DesMoinesBCycle_20240501_20240531.csv")
     app.db.close_connection()
     pass
 

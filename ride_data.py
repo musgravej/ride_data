@@ -2,9 +2,14 @@ import pendulum
 
 # import csv
 import sqlite3
+from sqlite3 import Connection
 import os
 import sys
 import pandas as pd
+
+from typing import Optional
+
+DB_NAME = "ridedb.db"
 
 
 class AppDB:
@@ -13,8 +18,8 @@ class AppDB:
     # TODO add decorator for handling db connection
     """
 
-    def __init__(self) -> None:
-        self.conn = None
+    def __init__(self, path: str) -> None:
+        self.db_path = path
 
     @staticmethod
     def csv_fields() -> list:
@@ -82,7 +87,9 @@ class AppDB:
             "`TripRouteCategory` TEXT,"
             "`TripProgramName` TEXT,"
             "`FileName` TEXT,"
-            "`ImportDateTime` TEXT"
+            "`ImportDateTime` TEXT,"
+            "`CheckoutDateTime` TEXT,"
+            "`ReturnDateTime` TEXT"
             ");"
         )
 
@@ -124,43 +131,42 @@ class AppDB:
         fields = [column[0] for column in cursor.description]
         return {key: value for key, value in zip(fields, row)}
 
-    def connect_db(self, path: str):
-        try:
-            self.conn = sqlite3.connect(path)
-            self.conn.row_factory = AppDB.dict_factory
-        except sqlite3.DatabaseError as e:
-            print(f"db connection error | {e}")
+    def connect_db(self, path: str) -> Connection:
+        conn = sqlite3.connect(path)
+        conn.row_factory = AppDB.dict_factory
+        return conn
 
     def init_db(self) -> None:
-        db_path = os.path.join(os.path.curdir, "ridedb.db")
-        if os.path.exists(db_path):
-            self.connect_db(db_path)
-            if self.db_table_exists("ride_data"):
-                return
+        if os.path.exists(self.db_path):
+            try:
+                conn = self.connect_db(self.db_path)
+                if self.db_table_exists(conn, "ride_data"):
+                    conn.close()
+                    return
+            except Exception as e:
+                raise Exception(f"connection failure | {e}")
 
         print("intializing database")
-        self.conn = sqlite3.connect(db_path)
-        schema = self.create_db_schema()
-        self.conn.execute(schema)
-
-    def db_table_exists(self, table_name: str) -> bool:
-        if not isinstance(self.conn, sqlite3.Connection):
-            return False
-
-        qry = "SELECT name FROM sqlite_master WHERE type='table' AND name=?;"
         try:
-            return self.conn.execute(qry, (table_name,)).fetchone()
+            conn = self.connect_db(self.db_path)
+            conn.execute(self.create_db_schema())
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            raise Exception(f"database creation error | {e}")
+
+    def db_table_exists(self, conn: Connection, table_name: str) -> bool:
+        try:
+            qry = "SELECT name FROM sqlite_master WHERE type='table' AND name=?;"
+            return conn.execute(qry, (table_name,)).fetchone() is not None
         except sqlite3.OperationalError:
             return False
 
-    def db_stats_to_string(self) -> str:
-        if not isinstance(self.conn, sqlite3.Connection):
-            return ""
-
+    def db_stats_to_string(self, conn: Connection) -> str:
         try:
-            row_count = self.conn.execute("SELECT COUNT(*) AS cnt FROM ride_data;").fetchone().get("cnt", 0)
+            row_count = conn.execute("SELECT COUNT(*) AS cnt FROM ride_data;").fetchone().get("cnt", 0)
             file_count = (
-                self.conn.execute(
+                conn.execute(
                     "WITH qry AS (SELECT FileName FROM ride_data GROUP BY FileName) select count(*) AS count FROM qry;"
                 )
                 .fetchone()
@@ -170,7 +176,7 @@ class AppDB:
                 "WITH qry1 AS (select datetime(CheckoutDateLocal||' '||CheckoutTimeLocal) AS return_dt FROM ride_data )"
                 " SELECT MIN(return_dt) AS min_return , MAX(return_dt) AS max_return FROM qry1;"
             )
-            date_rslt = self.conn.execute(date_qry).fetchone()
+            date_rslt = conn.execute(date_qry).fetchone()
             return (
                 f"DB Rows: {row_count}\nFile Count: {file_count}\n"
                 f"Min Checkout Date: {date_rslt["min_return"]}\nMax Checkout Date: {date_rslt["max_return"]}"
@@ -178,55 +184,57 @@ class AppDB:
         except Exception as e:
             return f"error | {e}"
 
-    def import_report_to_db(self, report_path: str) -> bool:
+    def import_report_to_db(self, report_path: str) -> None:
         """
         Import a csv file, of correct format to db
-        Returns True on success, False on failure
         """
-        if not isinstance(self.conn, sqlite3.Connection):
-            return False
-        try:
-            filename = os.path.split(report_path)[1]
-            print(f"importing report: '{filename}'")
-            df = pd.read_csv(report_path, dtype=self.df_dtype())
-            df = df.fillna("")
-            df["FileName"] = filename
-            df["ImportDateTime"] = pendulum.now().to_datetime_string()
-            for row in df.itertuples():
-                cols = [each for each in row._fields if each != "Index"]
-                placeholders = ', '.join('?' * len(cols))
-                values = [int(x) if isinstance(x, bool) else x for x in (row.__getattribute__(each) for each in cols)]
-                sql = "REPLACE INTO ride_data ({}) VALUES ({});".format(", ".join(cols), placeholders)
-                self.conn.execute(sql, values)
-            self.conn.commit()
-            return True
-        except Exception as e:
-            print(f"import report failure | {e}")
-            return False
+        with self.connect_db(self.db_path) as conn:
+            try:
+                conn = self.connect_db(self.db_path)
+                filename = os.path.split(report_path)[1]
+                print(f"importing report: '{filename}'")
 
-    def close_connection(self) -> None:
-        if not isinstance(self.conn, sqlite3.Connection):
-            return
-        self.conn.close()
+                # pre-sql data processing
+                df = pd.read_csv(report_path, dtype=self.df_dtype())
+                df = df.fillna("")
+                df["FileName"] = filename
+                df["ImportDateTime"] = pendulum.now().to_datetime_string()
+                df["ReturnDateTime"] = df["ReturnDateLocal"] + " " + df["ReturnTimeLocal"]
+                df["CheckoutDateTime"] = df["CheckoutDateLocal"] + " " + df["CheckoutTimeLocal"]
+                df_cols = df.columns.to_list()
+
+                for row in df.itertuples():
+                    placeholders = ', '.join('?' * len(df_cols))
+                    values = [
+                        int(x) if isinstance(x, bool) else x for x in (row.__getattribute__(each) for each in df_cols)
+                    ]
+                    sql = "REPLACE INTO ride_data ({}) VALUES ({});".format(", ".join(df_cols), placeholders)
+                    conn.execute(sql, values)
+                conn.commit()
+            except Exception as e:
+                print(f"import report failure | {e}")
+        conn.close()
 
 
 class App:
-    def __init__(self) -> None:
-        self.db = AppDB()
+    def __init__(self, db_name: Optional[str] = None) -> None:
+        self.db_name = db_name or DB_NAME
+        self.db = AppDB(self.db_name)
         self.session_name_string = pendulum.now().format("YYYY-MM-DD_HH-mm-ss")
 
     def init_app(self) -> bool:
         """
         Initialize app, if fails, return false
         """
-        self.db.init_db()
-        if self.db is None:
+        try:
+            self.db.init_db()
+        except Exception as e:
+            print(f"failed to initialize app | {e}")
             return False
-
         return True
 
     def show_main_menu(self) -> None:
-        stats = self.db.db_stats_to_string()
+        # stats = self.db.db_stats_to_string()
         pass
 
     def show_db_menu(self) -> None:
@@ -241,13 +249,12 @@ class App:
 
 def run():
     app = App()
+    # app = App("ride_db.db")
     if not app.init_app():
-        print("app initialization failed")
-        app.db.close_connection()
         sys.exit(1)
 
-    app.db.import_report_to_db("./BCycle_45_DesMoinesBCycle_20240501_20240531.csv")
-    app.db.close_connection()
+    # app.db.import_report_to_db("./BCycle_45_DesMoinesBCycle_20240501_20240531.csv")
+    # app.db.import_report_to_db("./BCycle_45_DesMoinesBCycle_20240601_20240630.csv")
     pass
 
 

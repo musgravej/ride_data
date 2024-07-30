@@ -167,7 +167,11 @@ class AppDB:
         """
         with self.connect_db(self.db_path) as conn:
             try:
-                row_count = conn.execute("SELECT COUNT(*) AS cnt FROM ride_data;").fetchone().get("cnt", 0)
+                row_count = (
+                    conn.execute("SELECT COUNT(*) AS cnt FROM ride_data;")
+                    .fetchone()
+                    .get("cnt", 0)
+                )
                 file_count = (
                     conn.execute(
                         "WITH qry AS (SELECT FileName FROM ride_data GROUP BY FileName) "
@@ -178,13 +182,14 @@ class AppDB:
                 )
                 date_qry = (
                     "WITH qry1 AS (select datetime(CheckoutDateLocal||' '||CheckoutTimeLocal) AS return_dt "
-                    "FROM ride_data ) SELECT MIN(return_dt) AS min_return , MAX(return_dt) AS max_return FROM qry1;")
+                    "FROM ride_data ) SELECT MIN(return_dt) AS min_return , MAX(return_dt) AS max_return FROM qry1;"
+                )
                 date_rslt = conn.execute(date_qry).fetchone()
                 conn.close()
                 return (
                     f"Database Rows: {row_count}\nSource File Count: {file_count}\n"
-                    f"Min Checkout Datetime: {date_rslt["min_return"]}\n"
-                    f"Max Checkout Datetime: {date_rslt["max_return"]}"
+                    f"Min Checkout Datetime: {date_rslt['min_return']}\n"
+                    f"Max Checkout Datetime: {date_rslt['max_return']}"
                 )
             except Exception as e:
                 print(f"db stats error | {e}")
@@ -205,16 +210,23 @@ class AppDB:
                 df = df.fillna("")
                 df["FileName"] = filename
                 df["ImportDateTime"] = pendulum.now().to_datetime_string()
-                df["ReturnDateTime"] = df["ReturnDateLocal"] + " " + df["ReturnTimeLocal"]
-                df["CheckoutDateTime"] = df["CheckoutDateLocal"] + " " + df["CheckoutTimeLocal"]
+                df["ReturnDateTime"] = (
+                    df["ReturnDateLocal"] + " " + df["ReturnTimeLocal"]
+                )
+                df["CheckoutDateTime"] = (
+                    df["CheckoutDateLocal"] + " " + df["CheckoutTimeLocal"]
+                )
                 df_cols = df.columns.to_list()
 
                 for row in df.itertuples():
-                    placeholders = ', '.join('?' * len(df_cols))
+                    placeholders = ", ".join("?" * len(df_cols))
                     values = [
-                        int(x) if isinstance(x, bool) else x for x in (row.__getattribute__(each) for each in df_cols)
+                        int(x) if isinstance(x, bool) else x
+                        for x in (row.__getattribute__(each) for each in df_cols)
                     ]
-                    sql = "REPLACE INTO ride_data ({}) VALUES ({});".format(", ".join(df_cols), placeholders)
+                    sql = "REPLACE INTO ride_data ({}) VALUES ({});".format(
+                        ", ".join(df_cols), placeholders
+                    )
                     conn.execute(sql, values)
                 conn.commit()
             except Exception as e:
@@ -244,20 +256,31 @@ class App:
         sys.exit(exit_code)
 
     def show_main_menu(self) -> None:
-        option_map = {"1": self.show_db_menu, "2": self.show_report_menu, "3": self.exit_app}
+        option_map = {
+            "1": self.show_db_menu,
+            "2": self.show_report_menu,
+            "3": self.exit_app,
+        }
         options = ["1: Database Actions", "2: Report Actions", "3: Quit"]
         stats = self.db.db_stats_to_string()
         print(stats)
 
-        user_choice = input(f"\nMain Menu:\n{'=' * 10}\nPick action:\n{'\n'.join(options)}\n")
+        user_choice = input(
+            f"\nMain Menu:\n{'=' * 10}\nPick action:\n{'\n'.join(options)}\n"
+        )
         while user_choice not in option_map.keys():
             self.show_main_menu()
         option_map[user_choice]()
 
     def show_db_menu(self) -> None:
         option_map = {"1": self.import_report_file, "2": self.show_main_menu}
-        options = ["1: Import report csv file", "2: Exit to Main menu",]
-        user_choice = input(f"\nDatabase Menu:\n{'=' * 14}\nPick action:\n{'\n'.join(options)}\n")
+        options = [
+            "1: Import report csv file",
+            "2: Exit to Main menu",
+        ]
+        user_choice = input(
+            f"\nDatabase Menu:\n{'=' * 14}\nPick action:\n{'\n'.join(options)}\n"
+        )
         while user_choice not in option_map.keys():
             self.show_db_menu()
         option_map[user_choice]()
@@ -271,7 +294,9 @@ class App:
         option_map = {"1": self.show_main_menu}
         options = ["1: Exit to Main menu"]
 
-        user_choice = input(f"\nReport Menu:\n{'=' * 12}\nPick action:\n{'\n'.join(options)}\n")
+        user_choice = input(
+            f"\nReport Menu:\n{'=' * 12}\nPick action:\n{'\n'.join(options)}\n"
+        )
         while user_choice not in option_map.keys():
             self.show_report_menu()
         option_map[user_choice]()

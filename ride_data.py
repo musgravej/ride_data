@@ -1,13 +1,13 @@
-import pendulum
+import os
 
 # import csv
 import sqlite3
-from sqlite3 import Connection
-import os
 import sys
-import pandas as pd
-
+from sqlite3 import Connection
 from typing import Optional
+
+import pandas as pd
+import pendulum
 
 DB_NAME = "ridedb.db"
 
@@ -170,16 +170,17 @@ class AppDB:
                 row_count = conn.execute("SELECT COUNT(*) AS cnt FROM ride_data;").fetchone().get("cnt", 0)
                 file_count = (
                     conn.execute(
-                        "WITH qry AS (SELECT FileName FROM ride_data GROUP BY FileName) select count(*) AS count FROM qry;"
+                        "WITH qry AS (SELECT FileName FROM ride_data GROUP BY FileName) "
+                        "SELECT count(*) AS count FROM qry;"
                     )
                     .fetchone()
                     .get("count", 0)
                 )
                 date_qry = (
-                    "WITH qry1 AS (select datetime(CheckoutDateLocal||' '||CheckoutTimeLocal) AS return_dt FROM ride_data )"
-                    " SELECT MIN(return_dt) AS min_return , MAX(return_dt) AS max_return FROM qry1;"
-                )
+                    "WITH qry1 AS (select datetime(CheckoutDateLocal||' '||CheckoutTimeLocal) AS return_dt "
+                    "FROM ride_data ) SELECT MIN(return_dt) AS min_return , MAX(return_dt) AS max_return FROM qry1;")
                 date_rslt = conn.execute(date_qry).fetchone()
+                conn.close()
                 return (
                     f"Database Rows: {row_count}\nSource File Count: {file_count}\n"
                     f"Min Checkout Datetime: {date_rslt["min_return"]}\n"
@@ -188,7 +189,6 @@ class AppDB:
             except Exception as e:
                 print(f"db stats error | {e}")
                 return ""
-        conn.close()
 
     def import_report_to_db(self, report_path: str) -> None:
         """
@@ -249,7 +249,7 @@ class App:
         stats = self.db.db_stats_to_string()
         print(stats)
 
-        user_choice = input(f"\nMain Menu:\n{'='* 10}\nPick action:\n{'\n'.join(options)}\n")
+        user_choice = input(f"\nMain Menu:\n{'=' * 10}\nPick action:\n{'\n'.join(options)}\n")
         while user_choice not in option_map.keys():
             self.show_main_menu()
         option_map[user_choice]()
@@ -257,7 +257,7 @@ class App:
     def show_db_menu(self) -> None:
         option_map = {"1": self.import_report_file, "2": self.show_main_menu}
         options = ["1: Import report csv file", "2: Exit to Main menu",]
-        user_choice = input(f"\nDatabase Menu:\n{'='* 14}\nPick action:\n{'\n'.join(options)}\n")
+        user_choice = input(f"\nDatabase Menu:\n{'=' * 14}\nPick action:\n{'\n'.join(options)}\n")
         while user_choice not in option_map.keys():
             self.show_db_menu()
         option_map[user_choice]()
@@ -271,7 +271,7 @@ class App:
         option_map = {"1": self.show_main_menu}
         options = ["1: Exit to Main menu"]
 
-        user_choice = input(f"\nReport Menu:\n{'='* 12}\nPick action:\n{'\n'.join(options)}\n")
+        user_choice = input(f"\nReport Menu:\n{'=' * 12}\nPick action:\n{'\n'.join(options)}\n")
         while user_choice not in option_map.keys():
             self.show_report_menu()
         option_map[user_choice]()
@@ -283,8 +283,6 @@ def run():
     if not app.init_app():
         app.exit_app(1)
 
-    # app.db.import_report_to_db("./BCycle_45_DesMoinesBCycle_20240501_20240531.csv")
-    # app.db.import_report_to_db("./BCycle_45_DesMoinesBCycle_20240601_20240630.csv")
     app.show_main_menu()
     pass
 

@@ -130,20 +130,18 @@ class AppDB:
         fields = [column[0] for column in cursor.description]
         return {key: value for key, value in zip(fields, row)}
 
-    def connect_db(self, path: str) -> Connection:
+    @classmethod
+    def connect_db(cls, path: str) -> Connection:
         conn = sqlite3.connect(path)
         conn.row_factory = AppDB.dict_factory
         return conn
 
     def init_db(self) -> None:
         if os.path.exists(self.db_path):
-            try:
-                conn = self.connect_db(self.db_path)
-                if self.db_table_exists(conn, "ride_data"):
-                    conn.close()
-                    return
-            except Exception as e:
-                raise Exception(f"connection failure | {e}")
+            conn = self.connect_db(self.db_path)
+            if self.db_table_exists(conn, "ride_data"):
+                conn.close()
+                return
 
         print("intializing database")
         try:
@@ -181,7 +179,7 @@ class AppDB:
                     .fetchone()
                     .get("count", 0)
                 )
-                stats["date_qry"] = (
+                date_qry = (
                     "WITH qry1 AS (select datetime(CheckoutDateLocal||' '||CheckoutTimeLocal) AS return_dt "
                     "FROM ride_data ) SELECT MIN(return_dt) AS min_return , MAX(return_dt) AS max_return FROM qry1;"
                 )

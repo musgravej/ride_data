@@ -130,18 +130,20 @@ class AppDB:
         fields = [column[0] for column in cursor.description]
         return {key: value for key, value in zip(fields, row)}
 
-    @classmethod
-    def connect_db(cls, path: str) -> Connection:
+    def connect_db(self, path: str) -> Connection:
         conn = sqlite3.connect(path)
         conn.row_factory = AppDB.dict_factory
         return conn
 
     def init_db(self) -> None:
         if os.path.exists(self.db_path):
-            conn = self.connect_db(self.db_path)
-            if self.db_table_exists(conn, "ride_data"):
-                conn.close()
-                return
+            try:
+                conn = self.connect_db(self.db_path)
+                if self.db_table_exists(conn, "ride_data"):
+                    conn.close()
+                    return
+            except Exception as e:
+                raise Exception(f"connection failure | {e}")
 
         print("intializing database")
         try:
@@ -152,7 +154,8 @@ class AppDB:
         except Exception as e:
             raise Exception(f"database creation error | {e}")
 
-    def db_table_exists(self, conn: Connection, table_name: str) -> bool:
+    @staticmethod
+    def db_table_exists(conn: Connection, table_name: str) -> bool:
         try:
             qry = "SELECT name FROM sqlite_master WHERE type='table' AND name=?;"
             return conn.execute(qry, (table_name,)).fetchone() is not None
@@ -161,7 +164,7 @@ class AppDB:
 
     def db_stats(self) -> dict:
         """
-        Returns a string with some database statistics
+        Returns a dictionary with some database statistics
         """
         stats = {}
         with self.connect_db(self.db_path) as conn:

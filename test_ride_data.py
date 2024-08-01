@@ -10,6 +10,12 @@ from ride_data import App, AppDB
 
 
 class TestAppDB(unittest.TestCase):
+    def sample_csv_lines(self) -> list:
+        return [
+            ("TripId,UserProgramName,UserId,UserRole,UserCity,UserState,UserZip,UserCountry,MembershipType,Bike,BikeType,CheckoutKioskName,ReturnKioskName,DurationMins,AdjustedDurationMins,UsageFee,AdjustmentFlag,Distance,EstimatedCarbonOffset,EstimatedCaloriesBurned,CheckoutDateLocal,ReturnDateLocal,CheckoutTimeLocal,ReturnTimeLocal,TripOver30Mins,LocalProgramFlag,TripRouteCategory,TripProgramName"),
+            ("33567793,Des Moines BCycle,2395732,Maintenance,,,,UNITED STATES,,21865,Standard,Lauridsen Skatepark,Lauridsen Skatepark,0,0,0,N,.0,.0,0,2024-06-02,2024-06-02,16:06:24,16:06:32,N,Y,Round Trip,Des Moines BCycle"),
+            ("33567803,Des Moines BCycle,2395732,Maintenance,,,,UNITED STATES,,11434,Standard,Lauridsen Skatepark,Lauridsen Skatepark,0,0,0,N,.0,.0,0,2024-06-02,2024-06-02,16:07:27,16:07:35,N,Y,Round Trip,Des Moines BCycle"),
+        ]
 
     def test_connect_db(self):
         app_db = AppDB(":memory:")
@@ -111,6 +117,8 @@ class TestAppDB(unittest.TestCase):
             with self.assertRaises(Exception):
                 self.assertEqual(app_db.db_stats(), {})
 
+    def test_import_report_to_db(self):
+        pass
 
 if __name__ == "__main__":
     unittest.main()

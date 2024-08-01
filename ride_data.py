@@ -195,6 +195,7 @@ class AppDB:
         conn.close()
         return stats
 
+    # TODO add tests
     def import_report_to_db(self, report_path: str) -> None:
         """
         Import a csv file, of correct format to db

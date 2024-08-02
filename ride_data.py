@@ -1,4 +1,7 @@
+import pathlib
+import argparse
 import os
+import re
 
 # import csv
 import sqlite3
@@ -19,6 +22,8 @@ class AppDB:
 
     def __init__(self, path: str) -> None:
         self.db_path = path
+        self.start_range = None
+        self.end_range = None
 
     @staticmethod
     def csv_fields() -> list:
@@ -136,6 +141,7 @@ class AppDB:
         return conn
 
     def init_db(self) -> None:
+        # os path must exist, :memory: not supported
         if os.path.exists(self.db_path):
             try:
                 conn = self.connect_db(self.db_path)
@@ -145,7 +151,7 @@ class AppDB:
             except Exception as e:
                 raise Exception(f"connection failure | {e}")
 
-        print("intializing database")
+        print("# Intializing database")
         try:
             conn = self.connect_db(self.db_path)
             conn.execute(self.create_db_schema())
@@ -162,35 +168,64 @@ class AppDB:
         except sqlite3.OperationalError:
             return False
 
-    def db_stats(self) -> dict:
+    # TODO test
+    def drop_temp_tables(self):
+        """
+        Temp tables is saved as views
+        """
+        with self.connect_db(self.db_path) as conn:
+            if views := conn.execute("SELECT name from sqlite_master where type = 'view';").fetchall():
+                [conn.execute(f"DROP VIEW {each['name']};") for each in views]
+
+    # TODO test custom table name
+    def db_stats(self, table_name: Optional[str] = None) -> list:
         """
         Returns a dictionary with some database statistics
         """
-        stats = {}
+        stats = []
+        table_name = table_name or "ride_data"
         with self.connect_db(self.db_path) as conn:
             try:
-                stats["row_count"] = (
-                    conn.execute("SELECT COUNT(*) AS cnt FROM ride_data;")
-                    .fetchone()
-                    .get("cnt", 0)
+                stats.append(
+                    {
+                        "name": "database count",
+                        "value": (
+                            conn.execute(
+                                "SELECT COUNT(*) AS cnt FROM {};".format(
+                                    table_name,
+                                )
+                            )
+                            .fetchone()
+                            .get("cnt", 0)
+                        ),
+                    }
                 )
-                stats["file_count"] = (
-                    conn.execute(
-                        "WITH qry AS (SELECT FileName FROM ride_data GROUP BY FileName) "
-                        "SELECT count(*) AS count FROM qry;"
-                    )
-                    .fetchone()
-                    .get("count", 0)
+                stats.append(
+                    {
+                        "name": "file count",
+                        "value": (
+                            conn.execute(
+                                "WITH qry AS (SELECT FileName FROM {} GROUP BY FileName) "
+                                "SELECT count(*) AS count FROM qry;".format(
+                                    table_name,
+                                )
+                            )
+                            .fetchone()
+                            .get("count", 0)
+                        ),
+                    }
                 )
                 date_qry = (
                     "WITH qry1 AS (select datetime(CheckoutDateLocal||' '||CheckoutTimeLocal) AS return_dt "
-                    "FROM ride_data ) SELECT MIN(return_dt) AS min_return , MAX(return_dt) AS max_return FROM qry1;"
+                    "FROM {}) SELECT MIN(return_dt) AS min_return , MAX(return_dt) AS max_return FROM qry1;".format(
+                        table_name,
+                    )
                 )
                 date_rslt = conn.execute(date_qry).fetchone()
-                stats["min_date"] = date_rslt["min_return"]
-                stats["max_date"] = date_rslt["max_return"]
+                stats.append({"name": "min date", "value": date_rslt["min_return"]})
+                stats.append({"name": "max date", "value": date_rslt["max_return"]})
             except Exception as e:
-                print(f"db stats error | {e}")
+                print(f"\n# DB stats error | {e}")
 
         conn.close()
         return stats
@@ -203,34 +238,27 @@ class AppDB:
             try:
                 conn = self.connect_db(self.db_path)
                 filename = os.path.split(report_path)[1]
-                print(f"importing report: '{filename}'")
+                print(f"# Importing report: '{filename}'")
 
                 # pre-sql data processing
                 df = pd.read_csv(report_path, dtype=self.df_dtype())
                 df = df.fillna("")
                 df["FileName"] = filename
                 df["ImportDateTime"] = pendulum.now().to_datetime_string()
-                df["ReturnDateTime"] = (
-                    df["ReturnDateLocal"] + " " + df["ReturnTimeLocal"]
-                )
-                df["CheckoutDateTime"] = (
-                    df["CheckoutDateLocal"] + " " + df["CheckoutTimeLocal"]
-                )
+                df["ReturnDateTime"] = df["ReturnDateLocal"] + " " + df["ReturnTimeLocal"]
+                df["CheckoutDateTime"] = df["CheckoutDateLocal"] + " " + df["CheckoutTimeLocal"]
                 df_cols = df.columns.to_list()
 
                 for row in df.itertuples():
                     placeholders = ", ".join("?" * len(df_cols))
                     values = [
-                        int(x) if isinstance(x, bool) else x
-                        for x in (row.__getattribute__(each) for each in df_cols)
+                        int(x) if isinstance(x, bool) else x for x in (row.__getattribute__(each) for each in df_cols)
                     ]
-                    sql = "REPLACE INTO ride_data ({}) VALUES ({});".format(
-                        ", ".join(df_cols), placeholders
-                    )
+                    sql = "REPLACE INTO ride_data ({}) VALUES ({});".format(", ".join(df_cols), placeholders)
                     conn.execute(sql, values)
                 conn.commit()
             except Exception as e:
-                print(f"import report failure | {e}")
+                print(f"\n# Import report failure | {e}")
         conn.close()
 
     def create_temp_table(self, table_name: str, sql: str) -> None:
@@ -252,6 +280,7 @@ class App:
         """
         try:
             self.db.init_db()
+            self.db.drop_temp_tables()
         except Exception as e:
             print(f"failed to initialize app | {e}")
             return False
@@ -261,6 +290,11 @@ class App:
         print("Exiting app")
         sys.exit(exit_code)
 
+    @classmethod
+    def print_stats(cls, stats_list: list) -> None:
+        print_strings = [f"{each['name']}: {each['value']}" for each in stats_list]
+        print(*print_strings, sep="\n")
+
     def show_main_menu(self) -> None:
         option_map = {
             "1": {"function": self.show_db_menu, "description": "Database Actions"},
@@ -268,17 +302,20 @@ class App:
             "3": {"function": self.exit_app, "description": "Quit"},
         }
         options = list(f"{k}: {v['description']}" for k, v in option_map.items())
-        stats = self.db.db_stats()
-        # print(stats)
+        self.print_stats(self.db.db_stats())
 
-        user_choice = input(
-            f"\nMain Menu:\n{'=' * 10}\nPick action:\n" + "\n".join(options) + "\n"
-        )
+        user_choice = input(f"\nMain Menu:\n{'=' * 10}\nPick action:\n" + "\n".join(options) + "\n")
         while user_choice not in option_map.keys():
             self.show_main_menu()
         option_map[user_choice]["function"]()
 
     def set_date_range(self) -> None:
+        pass
+
+    def drop_rows_by_filename(self):
+        pass
+
+    def drop_rows_by_date_range(self):
         pass
 
     def show_db_menu(self) -> None:
@@ -289,7 +326,7 @@ class App:
             },
             "2": {
                 "function": self.set_date_range,
-                "desciption": "Set temporary date range",
+                "description": "Set temporary date range",
             },
             "3": {
                 "function": self.show_main_menu,
@@ -297,16 +334,19 @@ class App:
             },
         }
         options = list(f"{k}: {v['description']}" for k, v in option_map.items())
-        user_choice = input(
-            f"\nDatabase Menu:\n{'=' * 14}\nPick action:\n" + "\n".join(options) + "\n"
-        )
+        user_choice = input(f"\nDatabase Menu:\n{'=' * 14}\nPick action:\n" + "\n".join(options) + "\n")
         while user_choice not in option_map.keys():
             self.show_db_menu()
         option_map[user_choice]["function"]()
         self.show_db_menu()
 
     def import_report_file(self) -> None:
+        # validate file path
         file_path = input("Report CSV file path: ")
+        if not os.path.exists(file_path):
+            print(f"\n# File path error | {file_path}")
+            return
+
         self.db.import_report_to_db(file_path)
 
     def show_report_menu(self) -> None:
@@ -318,17 +358,32 @@ class App:
         }
         options = list(f"{k}: {v['description']}" for k, v in option_map.items())
 
-        user_choice = input(
-            f"\nReport Menu:\n{'=' * 12}\nPick action:\n" + "\n".join(options) + "\n"
-        )
+        user_choice = input(f"\nReport Menu:\n{'=' * 12}\nPick action:\n" + "\n".join(options) + "\n")
         while user_choice not in option_map.keys():
             self.show_report_menu()
         option_map[user_choice]["function"]()
         self.show_report_menu()
 
 
+def db_path_type(value: Optional[str] = None) -> str | None:
+    if value is not None and not re.match(r"^.*\.(db)$", value):
+        raise argparse.ArgumentTypeError("invalid db path name")
+    return value
+
+
+def app_args() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Ride data processor")
+    parser.add_argument(
+        "--db-path", action="store", type=db_path_type, help="initialize app with custom database path name"
+    )
+    return parser
+
+
 def run():
-    app = App()
+    args = app_args()
+    parsed_args = args.parse_args()
+
+    app = App(parsed_args.db_path)
     if not app.init_app():
         app.exit_app(1)
 

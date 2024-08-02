@@ -133,7 +133,7 @@ class TestAppDB(unittest.TestCase):
             app_db.init_db()
             sqlite3.connect(temp_db).execute("DROP TABLE `ride_data`;")
             self.assertEqual(app_db.db_stats(), {})
-            mock_print.assert_called_with("db stats error | no such table: ride_data")
+            mock_print.assert_called_with("\n# DB stats error | no such table: ride_data")
 
     def test_import_report_to_db(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -158,7 +158,7 @@ class TestAppDB(unittest.TestCase):
             temp_db = os.path.join(temp_dir, "test.db")
             app_db = AppDB(temp_db)
             app_db.import_report_to_db(test_csv)
-            mock_print.assert_called_with("import report failure | no such table: ride_data")
+            mock_print.assert_called_with("\n# Import report failure | no such table: ride_data")
 
     @patch("builtins.print")
     def test_import_report_to_db_no_report(self, mock_print):
@@ -168,7 +168,7 @@ class TestAppDB(unittest.TestCase):
             app_db.init_db()
             conn = sqlite3.connect(temp_db)
             app_db.import_report_to_db("foo.csv")
-            mock_print.assert_called_with("import report failure | [Errno 2] No such file or directory: 'foo.csv'")
+            mock_print.assert_called_with("\n# Import report failure | [Errno 2] No such file or directory: 'foo.csv'")
 
 
 class TestApp(unittest.TestCase):

@@ -1,4 +1,4 @@
-import pathlib
+# import pathlib
 import argparse
 import os
 import re
@@ -11,6 +11,9 @@ from typing import Optional
 
 import pandas as pd
 import pendulum
+from pendulum.parsing.exceptions import ParserError
+
+# from pendulum.datetime import DateTime
 
 DB_NAME = "ridedb.db"
 
@@ -20,10 +23,12 @@ class AppDB:
     class for managing sqlite database
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, table_name: Optional[str] = None) -> None:
         self.db_path = path
         self.start_range = None
         self.end_range = None
+        self.table_name = table_name or "ride_data"
+        self.temp_view_name = None
 
     @staticmethod
     def csv_fields() -> list:
@@ -141,11 +146,11 @@ class AppDB:
         return conn
 
     def init_db(self) -> None:
-        # os path must exist, :memory: not supported
+        # os path must exist, in :memory: not supported
         if os.path.exists(self.db_path):
             try:
                 conn = self.connect_db(self.db_path)
-                if self.db_table_exists(conn, "ride_data"):
+                if self.db_table_exists(conn, self.table_name):
                     conn.close()
                     return
             except Exception as e:
@@ -177,13 +182,16 @@ class AppDB:
             if views := conn.execute("SELECT name from sqlite_master where type = 'view';").fetchall():
                 [conn.execute(f"DROP VIEW {each['name']};") for each in views]
 
+    def get_current_table_name(self) -> str:
+        return self.temp_view_name or self.table_name
+
     # TODO test custom table name
     def db_stats(self, table_name: Optional[str] = None) -> list:
         """
         Returns a dictionary with some database statistics
         """
         stats = []
-        table_name = table_name or "ride_data"
+        table_name = self.get_current_table_name()
         with self.connect_db(self.db_path) as conn:
             try:
                 stats.append(
@@ -236,7 +244,7 @@ class AppDB:
         """
         with self.connect_db(self.db_path) as conn:
             try:
-                conn = self.connect_db(self.db_path)
+                # conn = self.connect_db(self.db_path)
                 filename = os.path.split(report_path)[1]
                 print(f"# Importing report: '{filename}'")
 
@@ -261,11 +269,20 @@ class AppDB:
                 print(f"\n# Import report failure | {e}")
         conn.close()
 
-    def create_temp_table(self, table_name: str, sql: str) -> None:
-        """
-        create view if not exists tmp_table as select * from ride_data where `ReturnDateLocal` > '2024-05-15';
-        """
-        pass
+    def create_temporary_view(self, view_name: str, sql: str) -> None:
+        with self.connect_db(self.db_path) as conn:
+            try:
+                # conn = self.connect_db(self.db_path)
+                # Drop table first
+                conn.execute(f"DROP VIEW IF EXISTS {view_name};")
+                conn.execute(sql)
+                conn.commit()
+                self.temp_view_name = view_name
+
+            except Exception as e:
+                print(f"\n# Temp view failure | {e}")
+
+        conn.close()
 
 
 class App:
@@ -290,8 +307,9 @@ class App:
         print("Exiting app")
         sys.exit(exit_code)
 
-    @classmethod
-    def print_stats(cls, stats_list: list) -> None:
+    def print_stats(self, stats_list: list) -> None:
+        if self.db.temp_view_name:
+            print("\n## TEMPORARY TABLE ##")
         print_strings = [f"{each['name']}: {each['value']}" for each in stats_list]
         print(*print_strings, sep="\n")
 
@@ -309,14 +327,113 @@ class App:
             self.show_main_menu()
         option_map[user_choice]["function"]()
 
-    def set_date_range(self) -> None:
-        pass
+    @staticmethod
+    def valid_date_parse(date_string: str) -> bool:
+        try:
+            pendulum.parse(date_string)
+            return True
+        except (ValueError, ParserError):
+            print(f"\n# Invalid date: {date_string}")
+            return False
 
+    @staticmethod
+    def get_start_end_date_range() -> tuple[str, str] | tuple[None, None]:
+        print("\nEnter date as string (ex: 2022-04-24)")
+        start_date = input("Start Date: ")
+        if not App.valid_date_parse(start_date):
+            return None, None
+
+        end_date = input(f"End Date (or {pendulum.now().to_date_string()}): ")
+        end_date = end_date or pendulum.now().to_datetime_string()
+        if not App.valid_date_parse(end_date):
+            return None, None
+
+        return (
+            pendulum.parse(start_date).start_of("day").to_datetime_string(),
+            pendulum.parse(end_date).end_of("day").to_datetime_string()
+        )
+
+    def set_temp_date_range(self) -> None:
+        start_date_dt, end_date_dt = App.get_start_end_date_range()
+        if start_date_dt is None or end_date_dt is None:
+            return
+
+        sql = (
+            "CREATE VIEW temp AS SELECT * FROM ride_data "
+            f"WHERE CheckoutDateTime >= '{start_date_dt}' AND CheckoutDateTime <= '{end_date_dt}';"
+        )
+
+        self.db.create_temporary_view("temp", sql)
+
+    def clear_date_range(self):
+        self.db.drop_temp_tables()
+        self.db.temp_view_name = None
+
+    @staticmethod
+    def choice_picker(
+        input_message: str,
+        choices: dict,
+        pre_input_message: Optional[str] = None,
+        post_input_message: Optional[str] = None,
+    ) -> str:
+        if pre_input_message is not None:
+            print(pre_input_message)
+
+        user_choice = input(input_message)
+        while user_choice not in choices.keys():
+            App.choice_picker(input_message, choices, pre_input_message, post_input_message)
+
+        if post_input_message is not None:
+            print(post_input_message)
+
+        return user_choice
+
+    # TODO
     def drop_rows_by_filename(self):
-        pass
+        print("\nDrop rows by filename:")
+        table_name = self.db.get_current_table_name()
+        filenames = {}
+        with self.db.connect_db(self.db.db_path) as conn:
+            try:
+                results = conn.execute(
+                    f"SELECT `FileName` from {table_name} GROUP BY `FileName` ORDER BY `FileName`;"
+                ).fetchmany()
+                filenames = {_idx.__str__(): row["FileName"] for _idx, row in enumerate(results, 1)}
+                filenames[(len(filenames) + 1).__str__()] = "Cancel"
+                pre_input = "\n".join(f"{n}: {f}" for n, f in filenames.items())
+                choice = App.choice_picker("Pick filename by number: ", filenames, pre_input_message=pre_input)
 
+                filename_choice = filenames.get(choice)
+                if filename_choice == "Cancel":
+                    conn.close()
+                    return
+
+                conn.execute(f"DELETE FROM {table_name} WHERE `FileName` = '{filename_choice}';")
+                conn.commit()
+
+            except Exception as e:
+                print(f"\n# Drop rows by filename error | {e}")
+        conn.close()
+
+    # TODO test
     def drop_rows_by_date_range(self):
-        pass
+        print("\nDrop rows by date range:")
+        table_name = self.db.get_current_table_name()
+        with self.db.connect_db(self.db.db_path) as conn:
+            try:
+                start_date_dt, end_date_dt = App.get_start_end_date_range()
+                if start_date_dt is None or end_date_dt is None:
+                    return
+
+                sql = (
+                    f"DELETE FROM `{table_name}` WHERE CheckoutDateTime >= '{start_date_dt}' "
+                    f"AND ReturnDateTime <= '{end_date_dt}';"
+                )
+                conn.execute(sql)
+                conn.commit()
+            except Exception as e:
+                print(f"\n# Drop rows by date range error | {e}")
+        conn.close()
 
     def show_db_menu(self) -> None:
         option_map = {
@@ -325,10 +442,22 @@ class App:
                 "description": "Import report csv file",
             },
             "2": {
-                "function": self.set_date_range,
+                "function": self.set_temp_date_range,
                 "description": "Set temporary date range",
             },
             "3": {
+                "function": self.clear_date_range,
+                "description": "Clear temporary date range",
+            },
+            "4": {
+                "function": self.drop_rows_by_date_range,
+                "description": "Drop table rows by date range",
+            },
+            "5": {
+                "function": self.drop_rows_by_filename,
+                "description": "Drop table rows by file name",
+            },
+            "6": {
                 "function": self.show_main_menu,
                 "description": "Return to Main menu",
             },
@@ -374,7 +503,10 @@ def db_path_type(value: Optional[str] = None) -> str | None:
 def app_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ride data processor")
     parser.add_argument(
-        "--db-path", action="store", type=db_path_type, help="initialize app with custom database path name"
+        "--db-path",
+        action="store",
+        type=db_path_type,
+        help="initialize app with custom database path name",
     )
     return parser
 

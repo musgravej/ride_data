@@ -1,5 +1,6 @@
 # import pathlib
 import argparse
+import csv
 import os
 import re
 
@@ -8,7 +9,9 @@ import sqlite3
 import sys
 from sqlite3 import Connection
 from typing import Optional
+from pathlib import Path
 
+# from numpy import absolute
 import pandas as pd
 import pendulum
 from pendulum.parsing.exceptions import ParserError
@@ -435,6 +438,34 @@ class App:
                 print(f"\n# Drop rows by date range error | {e}")
         conn.close()
 
+    @staticmethod
+    def create_file_path(file_path: str, set_extention: Optional[str] = None) -> str:
+        absolute_path = Path(file_path).absolute()
+        file_name = absolute_path.name
+        if not absolute_path.parent.exists:
+            os.makedirs(absolute_path.parent)
+        if set_extention is not None:
+            file_name = f"{absolute_path.name}.{set_extention}"
+        return absolute_path.parent.joinpath(file_name).__str__()
+
+    def dump_database(self):
+        ans = input("\nDump rows to file, filepath: ")
+        file_path = App.create_file_path(ans, "csv")
+
+        table_name = self.db.get_current_table_name()
+        with self.db.connect_db(self.db.db_path) as conn:
+            try:
+                result = conn.execute(f"SELECT * FROM `{table_name}` ORDER BY CheckoutDateTime;")
+                headers = [col[0] for col in result.description]
+                with open(file_path, "w") as fopen:
+                    csvw = csv.DictWriter(fopen, headers)
+                    csvw.writeheader()
+                    csvw.writerows(row for row in result)
+
+            except Exception as e:
+                print(f"Dump database rows error | {e}")
+        conn.close()
+
     def show_db_menu(self) -> None:
         option_map = {
             "1": {
@@ -458,8 +489,12 @@ class App:
                 "description": "Drop table rows by file name",
             },
             "6": {
+                "function": self.dump_database,
+                "description": "Dump database rows to a csv file",
+            },
+            "7": {
                 "function": self.show_main_menu,
-                "description": "Return to Main menu",
+                "description": "Return to main menu",
             },
         }
         options = list(f"{k}: {v['description']}" for k, v in option_map.items())
